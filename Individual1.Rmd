@@ -1,0 +1,157 @@
+---
+title: "Individual1"
+author: "Max Wisnieski"
+date: "10/6/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+library(tidyverse)
+library(dbplyr)
+offense <- read_excel('cyclonesFootball2019.xlsx', sheet='Offensive')
+defense <- read_excel('cyclonesFootball2019.xlsx', sheet='Defensive')
+biography <- read_excel('cyclonesFootball2019.xlsx', sheet='Biography')
+```
+
+## Part One: Cleaning Data
+
+**1. **The player names and opponent names are factors.
+
+```{r}
+offClean <- offense
+offClean$Name <- factor(offClean$Name)
+offClean$Opponent_Opponent <- factor(offClean$Opponent_Opponent)
+offClean <- offClean %>% rename(Opponent = 'Opponent_Opponent')
+defClean <- defense
+defClean$Name <- factor(defClean$Name)
+defClean$Opponent_Opponent <- factor(defClean$Opponent_Opponent)
+defClean <- defClean %>% rename(Opponent = 'Opponent_Opponent')
+bioClean <- biography
+bioClean$Name <- factor(bioClean$Name)
+```
+
+**2. **All offensive and defensive statistics are numerical. The Weight column in biogrpahy is also numeric. (Optional: Learn to mutate multiple columns systematically using the ?across function in `dplyr)
+
+```{r}
+offClean <- offClean %>% mutate(across(c(Rushing_ATT:Receiving_TD), as.numeric))
+offClean <- offClean %>% mutate(across(c(Passing_YDS:Passing_INT), as.numeric))
+defClean <- defClean %>% mutate(across(c(Tackles_Solo:Pass_PB), as.numeric))
+bioClean <- bioClean %>% mutate(across(Weight, as.numeric))
+```
+
+**3. **Change the Height column in biography into numeric. (Hint: Use a unit that works well)
+
+```{r}
+temp <- bioClean %>% select(c(Height, Name)) %>% separate(Height, c("Feet", "Inches"), sep = "-")
+temp <- temp %>% mutate(across(c(Feet:Inches), as.numeric))
+temp$Height <- (temp$Feet * 12) + temp$Inches
+temp <- temp %>% select(c(-Feet, -Inches))
+bioClean <- bioClean %>% select(-Height) %>%
+  left_join(temp, by = 'Name')
+str(bioClean)
+str(offClean)
+str(defClean)
+```
+
+## Part 2: Tidying
+
+**1. **Reformat the defClean data frame into a tidy format using pivot_longer. The type of statistic (Tackles_Solo, Tackles_ASST, etc) is added as a new key column named stat.
+
+```{r}
+defClean <- defClean %>% pivot_longer(Tackles_Solo:Pass_PB, names_to  = "Stat", values_to = "Total")
+defClean
+```
+
+**2. **Compare the distributions of the defensive statistics. What defensive skills are rare?
+
+```{r}
+ggplot(defClean, aes(y = Total)) + geom_histogram()  + facet_wrap(~Stat) + coord_flip() + labs(x = "Count", y = "Stat Totals", title = "Distribution of Stat Totals by Stat Type")
+```
+
+- **Analysis: **Looking at the histograms we can see that all of the stats are right skewed. The stats that are the most frequent are "Takles_Solo", and "Tackles_ASST" because they have most values above zero. The rarest stats come from the three "Turnover" statistics because the large majority of the stat totals is at zero, and the highest they reach is one.
+
+**3. **Did ISU have better defense against Iowa or Notre Dame? Answer this question by creating a scatterplot with x- and y-axes being the number of solo tackles (of each player). A large number of solo tackles is an indicator of good defense.
+
+```{r}
+grouped <- defClean %>% group_by(Opponent)
+grouped <- grouped %>% filter(Opponent == "Iowa" | Opponent == "Notre Dame") %>% pivot_wider(names_from = 'Opponent', values_from = 'Total') %>% filter(Stat == "Tackles_Solo")
+grouped <- rename(grouped, Notre_Dame = "Notre Dame")
+ggplot(grouped, aes(x = Iowa, y = Notre_Dame)) + geom_jitter() + geom_abline(intercept = 0, slope = 1) + labs(xlab = "Iowa", ylab = "Notre Dame", title = "Players Solo Tackles Recorded by Game")
+summary(grouped$Iowa)
+summary(grouped$Notre_Dame)
+```
+
+- **Analysis: **Based on the the scatter plot, ISU had better defense against Notre Dame. While the Iowa game did see the a player record the highest solo tackles at 7, the average number of solo tackles in the Notre Dame game seems to be higher because there are more points towards the the upper part of the graph.
+
+**4. **Separate the Hometown column into two columns, namely the city and the state. Print the first few rows of these two columns. (Hint: look at the sep= argument of separate)
+
+```{r}
+bioClean <- bioClean %>% separate(Hometown, c("City", "State"), sep = ", ")
+str(bioClean)
+```
+
+**5. **How many players are there from each state?
+
+```{r}
+statetotal <- table(bioClean$State)
+statetotal
+```
+
+## Part 3: Joining Data Frames
+
+**1. **Find which states do the ISU defensive and offensive players come from. Create an appropriate summary.
+
+```{r}
+Name <- unique(offClean$Name)
+Name <- data.frame(Name)
+offState <- left_join(Name, bioClean, by = 'Name')
+Name <- unique(defClean$Name)
+Name <- data.frame(Name)
+defState <- left_join(Name, bioClean, by = 'Name')
+offState$State
+ggplot(offState, aes(State)) + geom_bar() + labs(x = "Home State", y = "Total Players", title = " Total Offensive Players From Each State")
+defState$State
+ggplot(defState, aes(State)) + geom_bar()+ labs(x = "Home State", y = "Total Players", title = " Total Defensive Players From Each State")
+```
+
+- **Analysis: **Of the offensive players with information in the bio data frame, the most common home states are Florida and Oklahoma. Both of which have two players from there. However, there are four players with no information in the bio data frame, so the distribution could be different. On the defensive side of the ball, the most common home state is Iowa with seven players. However, there are thirteen players without any information that could affect the true distribution.
+
+**2. **How does the performance of quarterback Brock Purdy relate to the performance of the ISU team?
+
+```{r}
+gamestats <- offClean
+brockStats <- gamestats %>% filter(Name == "Purdy, Brock") %>% filter(Passing_YDS != 0)
+gamestats <- gamestats %>% filter(Name != "Purdy, Brock")
+gamestats <- gamestats %>% select(-'Passing_CMP-ATT', -Name) %>% filter(Rushing_YDS != 0)
+ggplot(gamestats, aes(Rushing_YDS)) + geom_histogram() + facet_wrap(~Opponent) + labs(x = "Rushing Yards", title = "Team Rushing Yards Per Game")
+ggplot(brockStats, aes(Passing_YDS)) + geom_histogram() + facet_wrap(~Opponent) + labs(x = "Passing Yards", title = "Brock Purdy Passing Yards Per Game")
+```
+
+- **Analysis: **Comparing the histograms of the team's rushing yards each game to the histograms of Brock Purdy's passing yards each game it seems as though on average the games with more passing yards will have more rushing yards as well. This could mean one of two things. Either the opponent defense was really bad, or as Purdy was throwing well, the defense focused more on trying to stop the passing game as opposed to the run game, allowing for more rushing yards.
+
+**3. **Which ISU player(s) made big progress over the last year? Compare the 2019 and the 2018 data
+
+```{r}
+offstats2018 <- read_excel('cyclonesFootball2018.xlsx', sheet='Offensive')
+offstats2018$Name <- factor(offstats2018$Name)
+offstats2018$Opponent_Opponent <- factor(offstats2018$Opponent_Opponent)
+offstats2018 <- offstats2018 %>% rename(Opponent = 'Opponent_Opponent')
+offstats2018 <- offstats2018 %>% mutate(across(c(Rushing_ATT:Receiving_TD), as.numeric))%>% mutate(across(c(Passing_YDS:Passing_INT), as.numeric))
+offstats2018 <- offstats2018 %>% rename(Rushing2018 = "Rushing_YDS") %>% rename(Receiving2018 = "Receiving_YDS") %>% rename(RushingATT2018 = "Rushing_ATT") %>% rename(Rec2018 = "Receiving_REC")
+offstats <- left_join(offClean, offstats2018, by = 'Name')
+offrush <- offstats %>% filter(Name != "Allen, Chase" & Name != "Kolar, Charlie" & Name != "Shaw Jr., Sean" & Name != "Scates, Joe" & Name != "Wilson, Darren" & Name != "Pettway, La'Michael")
+ggplot(offrush) + geom_point(aes(Rushing2018, RushingATT2018)) + geom_point(aes(Rushing_YDS, Rushing_ATT), color = "red") + facet_wrap(~Name) + labs(x = "Rushing Yards", y = "Rushing Attempts", title = "Rushing Yards and Attempts by Player in 2018(black) and 2019(red)")
+offrec <- offstats %>% filter(is.na(Receiving_REC) == FALSE)
+ggplot(offrec) + geom_point(aes(Receiving2018, Rec2018)) + geom_point(aes(Receiving_YDS, Receiving_REC), color = "red") + facet_wrap(~Name) + labs(x = "Receiving Yards", y = "Receptions", title = "Receiving Yards and Receptions by Player in 2018(black) and 2019(red)")
+```
+
+- **Formatting Issue: **I am unsure why the axis of the graphs are crammed into the corner, and using scales = "free_x" only made the graphs look worse. Since the points are still plotted where they should be, it is still possible to do analysis on how the distribution changes by year. This is why I have left them as they are.
+
+- **Rushing Analysis: **For the 2018 season the rushing game was mostly controlled by Johnnie Lang, Kene Nwangwu, and Brock Purdy, but their stats were not too impressive. In 2019 their stats for yards and attempts stayed about the same. However, In 2019, the rushing game was completely dominated by Breece Hall, having more yards and attempts than anyone in either year.
+
+- **Receiving Analysis: **For the 2018 season the receiving game doesn't appear to be very good. While Deshaunte Jones, Charlie Kolar, and Tarique Milton had the majority of the receptions on the team, none of them had very many receiving yards to show for it. Then in 2019 all three of them greatly improved in receiving yards, as well as Breece Hall and La'Michael Pettway joining the group.
